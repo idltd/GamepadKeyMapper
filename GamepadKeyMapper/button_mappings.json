@@ -1,22 +1,22 @@
 {
     "buttonMappings": [
       {
-        "_comment": "A button - Start Debugging (F5)",
+        "_comment": "+ - A button - Start Debugging (F5)",
         "gamepadButton": 0,
         "keyboardKeys": [116]
       },
       {
-        "_comment": "B button - Stop Debugging (Shift + F5)",
+        "_comment": "O - B button - Stop Debugging (Shift + F5)",
         "gamepadButton": 1,
         "keyboardKeys": [16, 116]
       },
       {
-        "_comment": "X button - Step Over (F10)",
+        "_comment": " - X button - Step Over (F10)",
         "gamepadButton": 2,
         "keyboardKeys": [121]
       },
       {
-        "_comment": "Y button - Step Into (F11)",
+        "_comment": "   - Y button - Step Into (F11)",
         "gamepadButton": 3,
         "keyboardKeys": [122]
       },
