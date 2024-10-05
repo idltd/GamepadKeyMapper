@@ -1,10 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
-using SharpDX.DirectInput;
-using Newtonsoft.Json;
+using System.CommandLine;
+using System.CommandLine.Invocation;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
+using SharpDX.DirectInput;
 
 class Program
 {
@@ -14,30 +17,162 @@ class Program
     const int KEYEVENTF_KEYDOWN = 0x0000;
     const int KEYEVENTF_KEYUP = 0x0002;
 
-    static bool verboseMode = false;
-
     class ButtonMapping
     {
-        public string _comment { get; set; }
-        public int GamepadButton { get; set; }
-        public int[] KeyboardKeys { get; set; }
+        public string _comment { get; set; } = string.Empty;
+        public int GamepadButton { get; set; } = 0;
+        public int[] KeyboardKeys { get; set; } = [];
     }
 
     class Profile
     {
-        public List<ButtonMapping> ButtonMappings { get; set; }
+        public List<ButtonMapping> ButtonMappings { get; set; } = [];
     }
 
     class MappingConfig
     {
-        public Dictionary<string, Profile> Profiles { get; set; }
+        public Dictionary<string, Profile> Profiles { get; set; } = [];
     }
 
-    static void Main(string[] args)
+    static async Task<int> Main(string[] args)
     {
-        verboseMode = args.Contains("-v") || args.Contains("--verbose");
+        var rootCommand = new RootCommand
+        {
+            Description = "Gamepad Key Mapper - Map gamepad inputs to keyboard events"
+        };
 
-        string profileName = args.Length > 0 && !args[0].StartsWith("-") ? args[0] : "default";
+        var configOption = new Option<FileInfo>(
+            aliases: new[] { "--config", "-c" },
+            description: "Path to the configuration file.",
+            getDefaultValue: () => new FileInfo("button_mappings.json"))
+        {
+            IsRequired = false,
+            Arity = ArgumentArity.ExactlyOne
+        };
+        configOption.AddValidator(result =>
+        {
+            var file = result.GetValueForOption(configOption);
+            if (file != null && !file.Exists)
+            {
+                result.ErrorMessage = $"Configuration file not found: {file.FullName}";
+            }
+        });
+
+        var profileOption = new Option<string>(
+            aliases: new[] { "--profile", "-p" },
+            description: "Profile name to use from the configuration.",
+            getDefaultValue: () => "default")
+        {
+            IsRequired = false,
+            Arity = ArgumentArity.ExactlyOne
+        };
+
+        var verboseOption = new Option<bool>(
+            aliases: new[] { "--verbose", "-v" },
+            description: "Enable verbose output.")
+        {
+            IsRequired = false,
+            Arity = ArgumentArity.Zero
+        };
+
+        var listOption = new Option<bool>(
+            aliases: new[] { "--list", "-l" },
+            description: "List available profiles and exit.")
+        {
+            IsRequired = false,
+            Arity = ArgumentArity.Zero
+        };
+
+        rootCommand.AddOption(configOption);
+        rootCommand.AddOption(profileOption);
+        rootCommand.AddOption(verboseOption);
+        rootCommand.AddOption(listOption);
+
+        rootCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var config = context.ParseResult.GetValueForOption(configOption);
+            var profile = context.ParseResult.GetValueForOption(profileOption);
+            var verbose = context.ParseResult.GetValueForOption(verboseOption);
+            var list = context.ParseResult.GetValueForOption(listOption);
+
+            await RunAsync(config!, profile!, verbose, list);
+        });
+
+        return await rootCommand.InvokeAsync(args);
+    }
+
+    static async Task RunAsync(FileInfo configFile, string profileName, bool verbose, bool list)
+    {
+        if (configFile == null)
+        {
+            Console.WriteLine("Error: Configuration file not specified.");
+            return;
+        }
+
+        if (!configFile.Exists)
+        {
+            Console.WriteLine($"Error: Configuration file '{configFile.FullName}' not found.");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(profileName))
+        {
+            Console.WriteLine("Error: Profile name not specified.");
+            return;
+        }
+
+        MappingConfig? mappingConfig;
+        try
+        {
+            string jsonContent = await File.ReadAllTextAsync(configFile.FullName);
+            mappingConfig = JsonConvert.DeserializeObject<MappingConfig>(jsonContent);
+            if (mappingConfig == null)
+            {
+                Console.WriteLine("Error: Failed to deserialize configuration file.");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading configuration file: {ex.Message}");
+            return;
+        }
+
+        if (mappingConfig.Profiles == null || mappingConfig.Profiles.Count == 0)
+        {
+            Console.WriteLine("Error: Configuration file is invalid or empty.");
+            return;
+        }
+
+        if (list)
+        {
+            Console.WriteLine("Available profiles:");
+            foreach (var profile in mappingConfig.Profiles.Keys)
+            {
+                Console.WriteLine($"- {profile}");
+            }
+            return;
+        }
+
+        if (!mappingConfig.Profiles.ContainsKey(profileName))
+        {
+            Console.WriteLine($"Profile '{profileName}' not found. Available profiles: {string.Join(", ", mappingConfig.Profiles.Keys)}");
+            return;
+        }
+
+        var buttonMappings = mappingConfig.Profiles[profileName].ButtonMappings;
+
+        Console.WriteLine($"Using profile: {profileName}");
+        Console.WriteLine("Loaded button mappings:");
+        foreach (var mapping in buttonMappings)
+        {
+            Console.WriteLine($"{mapping._comment} - Gamepad button: {mapping.GamepadButton}, Keyboard keys: {string.Join(", ", mapping.KeyboardKeys)}");
+        }
+
+        if (verbose)
+        {
+            Console.WriteLine("Verbose mode enabled. Reporting all commands and keystrokes.");
+        }
 
         var directInput = new DirectInput();
         var joystick = directInput.GetDevices(DeviceType.Gamepad, DeviceEnumerationFlags.AllDevices).FirstOrDefault();
@@ -51,29 +186,7 @@ class Program
         var device = new Joystick(directInput, joystick.InstanceGuid);
         device.Acquire();
 
-        // Load button mappings from JSON
-        var mappingConfig = JsonConvert.DeserializeObject<MappingConfig>(File.ReadAllText("button_mappings.json"));
-        
-        if (!mappingConfig.Profiles.ContainsKey(profileName))
-        {
-            Console.WriteLine($"Profile '{profileName}' not found. Available profiles: {string.Join(", ", mappingConfig.Profiles.Keys)}");
-            return;
-        }
-
-        var buttonMappings = mappingConfig.Profiles[profileName].ButtonMappings;
-
-        Console.WriteLine($"Using profile: {profileName}");
         Console.WriteLine("Gamepad connected. Press Ctrl+C to exit.");
-        Console.WriteLine("Loaded button mappings:");
-        foreach (var mapping in buttonMappings)
-        {
-            Console.WriteLine($"{mapping._comment} - Gamepad button: {mapping.GamepadButton}, Keyboard keys: {string.Join(", ", mapping.KeyboardKeys)}");
-        }
-
-        if (verboseMode)
-        {
-            Console.WriteLine("Verbose mode enabled. Reporting all commands and keystrokes.");
-        }
 
         while (true)
         {
@@ -87,7 +200,7 @@ class Program
                 {
                     if (state.Buttons[i])
                     {
-                        if (verboseMode)
+                        if (verbose)
                         {
                             Console.WriteLine($"Gamepad button {i} pressed. Sending keys: {string.Join(", ", mapping.KeyboardKeys)}");
                         }
@@ -98,7 +211,7 @@ class Program
                     }
                     else
                     {
-                        if (verboseMode)
+                        if (verbose)
                         {
                             Console.WriteLine($"Gamepad button {i} released. Releasing keys: {string.Join(", ", mapping.KeyboardKeys)}");
                         }
@@ -110,7 +223,7 @@ class Program
                 }
             }
 
-            System.Threading.Thread.Sleep(10);
+            await Task.Delay(10);
         }
     }
 }
