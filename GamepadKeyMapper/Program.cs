@@ -17,6 +17,8 @@ class Program
     const int KEYEVENTF_KEYDOWN = 0x0000;
     const int KEYEVENTF_KEYUP = 0x0002;
 
+    private GamepadState gamepadState = new GamepadState();
+
     class ButtonMapping
     {
         public string _comment { get; set; } = string.Empty;
@@ -34,7 +36,41 @@ class Program
         public Dictionary<string, Profile> Profiles { get; set; } = [];
     }
 
+    class GamepadState
+    {
+        private Dictionary<int, bool> buttonStates = new Dictionary<int, bool>();
+
+        public bool UpdateButtonState(int buttonIndex, bool currentState)
+        {
+            if (!buttonStates.ContainsKey(buttonIndex))
+            {
+                buttonStates[buttonIndex] = false;
+            }
+
+            if (currentState && !buttonStates[buttonIndex])
+            {
+                // Button is pressed for the first time
+                buttonStates[buttonIndex] = true;
+                return true;
+            }
+            else if (!currentState && buttonStates[buttonIndex])
+            {
+                // Button is released
+                buttonStates[buttonIndex] = false;
+            }
+
+            // Ignore repeated presses
+            return false;
+        }
+    }
+
     static async Task<int> Main(string[] args)
+    {
+        var program = new Program();
+        return await program.RunAsync(args);
+    }
+
+    async Task<int> RunAsync(string[] args)
     {
         var rootCommand = new RootCommand
         {
@@ -95,13 +131,13 @@ class Program
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
             var list = context.ParseResult.GetValueForOption(listOption);
 
-            await RunAsync(config!, profile!, verbose, list);
+            await ExecuteAsync(config!, profile!, verbose, list);
         });
 
         return await rootCommand.InvokeAsync(args);
     }
 
-    static async Task RunAsync(FileInfo configFile, string profileName, bool verbose, bool list)
+    async Task ExecuteAsync(FileInfo configFile, string profileName, bool verbose, bool list)
     {
         if (configFile == null)
         {
@@ -198,7 +234,8 @@ class Program
                 var mapping = buttonMappings.FirstOrDefault(m => m.GamepadButton == i);
                 if (mapping != null)
                 {
-                    if (state.Buttons[i])
+                    bool isNewPress = this.gamepadState.UpdateButtonState(i, state.Buttons[i]);
+                    if (isNewPress)
                     {
                         if (verbose)
                         {
@@ -207,23 +244,20 @@ class Program
                         foreach (var key in mapping.KeyboardKeys)
                         {
                             keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                            keybd_event((byte)key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                         }
                     }
                     else
                     {
                         if (verbose)
                         {
-                            Console.WriteLine($"Gamepad button {i} released. Releasing keys: {string.Join(", ", mapping.KeyboardKeys)}");
-                        }
-                        foreach (var key in mapping.KeyboardKeys)
-                        {
-                            keybd_event((byte)key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                            Console.WriteLine($"Gamepad button {i} ignored - debouncing.");
                         }
                     }
                 }
-            }
 
-            await Task.Delay(10);
+                await Task.Delay(10);
+            }
         }
     }
 }
