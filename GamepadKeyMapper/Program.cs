@@ -8,9 +8,10 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using SharpDX.DirectInput;
-
 class Program
 {
+    private HashSet<int> pressedButtons = new HashSet<int>();
+
     [DllImport("user32.dll")]
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
@@ -23,9 +24,15 @@ class Program
     {
         public string _comment { get; set; } = string.Empty;
         public int GamepadButton { get; set; } = 0;
+        public GamepadAxis? GamepadAxis { get; set; }
         public int[] KeyboardKeys { get; set; } = [];
     }
 
+    class GamepadAxis
+    {
+        public int Axis { get; set; }
+        public string Direction { get; set; } = string.Empty;
+    }
     class Profile
     {
         public List<ButtonMapping> ButtonMappings { get; set; } = [];
@@ -224,23 +231,83 @@ class Program
 
         Console.WriteLine("Gamepad connected. Press Ctrl+C to exit.");
 
-        while (true)
-        {
-            device.Poll();
-            var state = device.GetCurrentState();
+while (true)
+{
+    device.Poll();
+    var state = device.GetCurrentState();
 
-            for (int i = 0; i < state.Buttons.Length; i++)
+    // Process buttons
+    for (int i = 0; i < state.Buttons.Length; i++)
+    {
+        var mapping = buttonMappings.FirstOrDefault(m => m.GamepadButton == i);
+        
+        if (state.Buttons[i])
+        {
+            if (!pressedButtons.Contains(i))
             {
-                var mapping = buttonMappings.FirstOrDefault(m => m.GamepadButton == i);
+                // Button has just been pressed
+                pressedButtons.Add(i);
+
+                if (verbose)
+                {
+                    if (mapping != null)
+                    {
+                        Console.WriteLine($"Gamepad button {i} pressed. Sending keys: {string.Join(", ", mapping.KeyboardKeys)}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Gamepad button {i} pressed. Sending Nothing");
+                    }
+                }
+
                 if (mapping != null)
                 {
-                    bool isNewPress = this.gamepadState.UpdateButtonState(i, state.Buttons[i]);
-                    if (isNewPress)
+                    // Trigger keyboard event
+                    foreach (var key in mapping.KeyboardKeys)
+                    {
+                        keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                        keybd_event((byte)key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    }
+                }
+            }
+        }
+        else
+        {
+            // Button released
+            pressedButtons.Remove(i);
+        }
+    }
+
+    // Process axes
+    ProcessAxis(state.X, buttonMappings.Where(m => m.GamepadAxis?.Axis == 0), 0, verbose);
+    ProcessAxis(state.Y, buttonMappings.Where(m => m.GamepadAxis?.Axis == 1), 1, verbose);
+    // Add more axes as needed
+
+    await Task.Delay(5);
+}
+
+        void ProcessAxis(int axisValue, IEnumerable<ButtonMapping> axisMappings, int axisIndex, bool verbose)
+        {
+            foreach (var mapping in axisMappings)
+            {
+                if (mapping.GamepadAxis != null)
+                {
+                    bool isPositive = mapping.GamepadAxis.Direction == "positive";
+                    bool isNegative = mapping.GamepadAxis.Direction == "negative";
+                    bool exceededThreshold = (isPositive && axisValue > 16384) || (isNegative && axisValue < -16384);
+
+                    if (verbose)
+                    {
+                        Console.WriteLine($"Axis {axisIndex}: Value = {axisValue}, Direction = {mapping.GamepadAxis.Direction}, Exceeded Threshold = {exceededThreshold}");
+                    }
+
+                    if (exceededThreshold)
                     {
                         if (verbose)
                         {
-                            Console.WriteLine($"Gamepad button {i} pressed. Sending keys: {string.Join(", ", mapping.KeyboardKeys)}");
+                            Console.WriteLine($"Triggering keys for Axis {axisIndex}: {string.Join(", ", mapping.KeyboardKeys)}");
                         }
+
                         foreach (var key in mapping.KeyboardKeys)
                         {
                             keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
@@ -248,8 +315,6 @@ class Program
                         }
                     }
                 }
-
-                await Task.Delay(10);
             }
         }
     }

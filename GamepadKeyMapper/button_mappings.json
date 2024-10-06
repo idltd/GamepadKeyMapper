@@ -21,6 +21,14 @@
           "_comment": "Y/Triangle button - Copy (Ctrl + C)",
           "gamepadButton": 3,
           "keyboardKeys": [17, 67]
+        },
+        {
+          "_comment": "Left stick up - Arrow Up",
+          "gamepadAxis": {
+            "axis": 1,
+            "direction": "negative"
+          },
+          "keyboardKeys": [38]
         }
       ]
     },
