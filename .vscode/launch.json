@@ -6,9 +6,9 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/bin/Debug/net8.0/GamepadKeyMapper.dll",
+            "program": "${workspaceFolder}\\GamepadKeyMapper\\bin\\Debug\\net8.0\\GamepadKeyMapper.dll",
             "args": [],
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}\\GamepadKeyMapper",
             "console": "internalConsole",
             "stopAtEntry": false
         },
@@ -17,9 +17,9 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/bin/Debug/net8.0/GamepadKeyMapper.dll",
+            "program": "${workspaceFolder}\\GamepadKeyMapper\\bin\\Debug\\net8.0\\GamepadKeyMapper.dll",
             "args": ["--config", "custom_config.json", "--profile", "vscode_debugging"],
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}\\GamepadKeyMapper",
             "console": "internalConsole",
             "stopAtEntry": false
         },
@@ -28,9 +28,9 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/bin/Debug/net8.0/GamepadKeyMapper.dll",
+            "program": "${workspaceFolder}\\GamepadKeyMapper\\bin\\Debug\\net8.0\\GamepadKeyMapper.dll",
             "args": ["--list"],
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}\\GamepadKeyMapper",
             "console": "internalConsole",
             "stopAtEntry": false
         },
@@ -39,9 +39,9 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/bin/Debug/net8.0/GamepadKeyMapper.dll",
+            "program": "${workspaceFolder}\\GamepadKeyMapper\\bin\\Debug\\net8.0\\GamepadKeyMapper.dll",
             "args": ["--verbose"],
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}\\GamepadKeyMapper",
             "console": "internalConsole",
             "stopAtEntry": false
         }

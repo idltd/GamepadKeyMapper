@@ -247,13 +247,6 @@ class Program
                             keybd_event((byte)key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                         }
                     }
-                    else
-                    {
-                        if (verbose)
-                        {
-                            Console.WriteLine($"Gamepad button {i} ignored - debouncing.");
-                        }
-                    }
                 }
 
                 await Task.Delay(10);
