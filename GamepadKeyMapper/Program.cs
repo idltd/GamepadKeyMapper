@@ -8,9 +8,15 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using SharpDX.DirectInput;
+
 class Program
 {
-    private HashSet<int> pressedButtons = new HashSet<int>();
+    [DllImport("user32.dll")]
+    static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    const int KEYEVENTF_KEYDOWN = 0x0000;
+    const int KEYEVENTF_KEYUP = 0x0002;
+
     private static readonly HashSet<int> ModifierKeys = new HashSet<int>
     {
         0x10, // VK_SHIFT
@@ -19,72 +25,37 @@ class Program
         0x5B, // VK_LWIN (Left Windows key)
         0x5C  // VK_RWIN (Right Windows key)
     };
-    [DllImport("user32.dll")]
-    static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
-    const int KEYEVENTF_KEYDOWN = 0x0000;
-    const int KEYEVENTF_KEYUP = 0x0002;
-
-    private GamepadState gamepadState = new GamepadState();
+    private Dictionary<int, ButtonMapping> buttonMappings = new Dictionary<int, ButtonMapping>();
+    private Dictionary<int, List<AxisMapping>> axisMappings = new Dictionary<int, List<AxisMapping>>();
+    private HashSet<int> pressedButtons = new HashSet<int>();
+    private const int AxisThreshold = 5000; // Adjust as needed
 
     class ButtonMapping
     {
-        public string _comment { get; set; } = string.Empty;
-        public int GamepadButton { get; set; } = 0;
-        public GamepadAxis? GamepadAxis { get; set; }
-        public int[] KeyboardKeys { get; set; } = [];
+        public int GamepadButton { get; set; }
+        public List<int> KeyboardKeys { get; set; } = new List<int>();
     }
 
-    class GamepadAxis
+    class AxisMapping
     {
         public int Axis { get; set; }
-        public string Direction { get; set; } = string.Empty;
+        public required string Direction { get; set; }
+        public List<int> KeyboardKeys { get; set; } = new List<int>();
     }
+
     class Profile
     {
-        public List<ButtonMapping> ButtonMappings { get; set; } = [];
+        public List<ButtonMapping> ButtonMappings { get; set; } = new List<ButtonMapping>();
+        public List<AxisMapping> AxisMappings { get; set; } = new List<AxisMapping>();
     }
 
     class MappingConfig
     {
-        public Dictionary<string, Profile> Profiles { get; set; } = [];
-    }
-
-    class GamepadState
-    {
-        private Dictionary<int, bool> buttonStates = new Dictionary<int, bool>();
-
-        public bool UpdateButtonState(int buttonIndex, bool currentState)
-        {
-            if (!buttonStates.ContainsKey(buttonIndex))
-            {
-                buttonStates[buttonIndex] = false;
-            }
-
-            if (currentState && !buttonStates[buttonIndex])
-            {
-                // Button is pressed for the first time
-                buttonStates[buttonIndex] = true;
-                return true;
-            }
-            else if (!currentState && buttonStates[buttonIndex])
-            {
-                // Button is released
-                buttonStates[buttonIndex] = false;
-            }
-
-            // Ignore repeated presses
-            return false;
-        }
+        public Dictionary<string, Profile> Profiles { get; set; } = new Dictionary<string, Profile>();
     }
 
     static async Task<int> Main(string[] args)
-    {
-        var program = new Program();
-        return await program.RunAsync(args);
-    }
-
-    async Task<int> RunAsync(string[] args)
     {
         var rootCommand = new RootCommand
         {
@@ -145,37 +116,111 @@ class Program
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
             var list = context.ParseResult.GetValueForOption(listOption);
 
-            await ExecuteAsync(config!, profile!, verbose, list);
+            var program = new Program();
+            await program.ExecuteAsync(config!, profile!, verbose, list);
         });
 
         return await rootCommand.InvokeAsync(args);
     }
 
-    async Task ExecuteAsync(FileInfo configFile, string profileName, bool verbose, bool list)
+    private void InitializeMappings(MappingConfig config, string profileName)
     {
-        if (configFile == null)
+        var profile = config.Profiles[profileName];
+
+        foreach (var mapping in profile.ButtonMappings)
         {
-            Console.WriteLine("Error: Configuration file not specified.");
-            return;
+            buttonMappings[mapping.GamepadButton] = new ButtonMapping
+            {
+                GamepadButton = mapping.GamepadButton,
+                KeyboardKeys = mapping.KeyboardKeys
+            };
         }
 
+        foreach (var mapping in profile.AxisMappings)
+        {
+            if (!axisMappings.ContainsKey(mapping.Axis))
+            {
+                axisMappings[mapping.Axis] = new List<AxisMapping>();
+            }
+            axisMappings[mapping.Axis].Add(new AxisMapping
+            {
+                Axis = mapping.Axis,
+                Direction = mapping.Direction,
+                KeyboardKeys = mapping.KeyboardKeys
+            });
+        }
+    }
+
+    private void ProcessButtonPress(ButtonMapping mapping)
+    {
+        var currentModifiers = new HashSet<int>();
+
+        foreach (var key in mapping.KeyboardKeys)
+        {
+            if (ModifierKeys.Contains(key))
+            {
+                currentModifiers.Add(key);
+                keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            }
+            else
+            {
+                keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                keybd_event((byte)key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+                foreach (var modifier in currentModifiers)
+                {
+                    keybd_event((byte)modifier, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                }
+                currentModifiers.Clear();
+            }
+        }
+
+        foreach (var modifier in currentModifiers)
+        {
+            keybd_event((byte)modifier, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+    }
+
+    private void ProcessAxis(int axisValue, int axisIndex, bool verbose)
+    {
+        if (!axisMappings.ContainsKey(axisIndex)) return;
+
+        foreach (var mapping in axisMappings[axisIndex])
+        {
+            int relativePosition = axisValue - 32768; // Assuming 16-bit range, adjust if different
+            bool exceededThreshold = (mapping.Direction == "positive" && relativePosition > AxisThreshold) ||
+                                     (mapping.Direction == "negative" && relativePosition < -AxisThreshold);
+
+            if (verbose)
+            {
+                Console.WriteLine($"Axis {axisIndex}: Value = {axisValue}, Direction = {mapping.Direction}, Exceeded Threshold = {exceededThreshold}");
+            }
+
+            if (exceededThreshold)
+            {
+                if (verbose)
+                {
+                    Console.WriteLine($"Triggering keys for Axis {axisIndex}: {string.Join(", ", mapping.KeyboardKeys)}");
+                }
+
+                ProcessButtonPress(new ButtonMapping { KeyboardKeys = mapping.KeyboardKeys });
+            }
+        }
+    }
+
+    async Task ExecuteAsync(FileInfo configFile, string profileName, bool verbose, bool list)
+    {
         if (!configFile.Exists)
         {
             Console.WriteLine($"Error: Configuration file '{configFile.FullName}' not found.");
             return;
         }
 
-        if (string.IsNullOrEmpty(profileName))
-        {
-            Console.WriteLine("Error: Profile name not specified.");
-            return;
-        }
-
-        MappingConfig? mappingConfig;
+        MappingConfig mappingConfig;
         try
         {
             string jsonContent = await File.ReadAllTextAsync(configFile.FullName);
-            mappingConfig = JsonConvert.DeserializeObject<MappingConfig>(jsonContent);
+            mappingConfig = JsonConvert.DeserializeObject<MappingConfig>(jsonContent) ?? new MappingConfig();
             if (mappingConfig == null)
             {
                 Console.WriteLine("Error: Failed to deserialize configuration file.");
@@ -210,13 +255,13 @@ class Program
             return;
         }
 
-        var buttonMappings = mappingConfig.Profiles[profileName].ButtonMappings;
+        InitializeMappings(mappingConfig, profileName);
 
         Console.WriteLine($"Using profile: {profileName}");
         Console.WriteLine("Loaded button mappings:");
-        foreach (var mapping in buttonMappings)
+        foreach (var mapping in buttonMappings.Values)
         {
-            Console.WriteLine($"{mapping._comment} - Gamepad button: {mapping.GamepadButton}, Keyboard keys: {string.Join(", ", mapping.KeyboardKeys)}");
+            Console.WriteLine($"Gamepad button: {mapping.GamepadButton}, Keyboard keys: {string.Join(", ", mapping.KeyboardKeys)}");
         }
 
         if (verbose)
@@ -246,107 +291,37 @@ class Program
             // Process buttons
             for (int i = 0; i < state.Buttons.Length; i++)
             {
-                var mapping = buttonMappings.FirstOrDefault(m => m.GamepadButton == i);
-
                 if (state.Buttons[i])
                 {
                     if (!pressedButtons.Contains(i))
                     {
-                        // Button has just been pressed
                         pressedButtons.Add(i);
-
-                        if (verbose)
+                        if (buttonMappings.TryGetValue(i, out ButtonMapping? mapping) && mapping != null)
                         {
-                            if (mapping != null)
+                            if (verbose)
                             {
                                 Console.WriteLine($"Gamepad button {i} pressed. Sending keys: {string.Join(", ", mapping.KeyboardKeys)}");
                             }
-                            else
-                            {
-                                Console.WriteLine($"Gamepad button {i} pressed. Sending Nothing");
-                            }
+                            ProcessButtonPress(mapping);
                         }
-
-                        if (mapping != null)
+                        else if (verbose)
                         {
-                            var currentModifiers = new HashSet<int>();
-
-                            foreach (var key in mapping.KeyboardKeys)
-                            {
-                                if (ModifierKeys.Contains(key))
-                                {
-                                    // If it's a modifier key, add it to current modifiers and press it
-                                    currentModifiers.Add(key);
-                                    keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
-                                }
-                                else
-                                {
-                                    // If it's not a modifier key, press and release it
-                                    keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
-                                    keybd_event((byte)key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-
-                                    // Release all current modifiers
-                                    foreach (var modifier in currentModifiers)
-                                    {
-                                        keybd_event((byte)modifier, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                                    }
-                                    currentModifiers.Clear();
-                                }
-                            }
-
-                            // Release any remaining modifiers
-                            foreach (var modifier in currentModifiers)
-                            {
-                                keybd_event((byte)modifier, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                            }
+                            Console.WriteLine($"Gamepad button {i} pressed. No mapping found.");
                         }
                     }
                 }
                 else
                 {
-                    // Button released
                     pressedButtons.Remove(i);
                 }
             }
 
             // Process axes
-            ProcessAxis(state.X, buttonMappings.Where(m => m.GamepadAxis?.Axis == 0), 0, verbose);
-            ProcessAxis(state.Y, buttonMappings.Where(m => m.GamepadAxis?.Axis == 1), 1, verbose);
+            ProcessAxis(state.X, 0, verbose);
+            ProcessAxis(state.Y, 1, verbose);
             // Add more axes as needed
 
             await Task.Delay(5);
-        }
-
-        void ProcessAxis(int axisValue, IEnumerable<ButtonMapping> axisMappings, int axisIndex, bool verbose)
-        {
-            foreach (var mapping in axisMappings)
-            {
-                if (mapping.GamepadAxis != null)
-                {
-                    bool isPositive = mapping.GamepadAxis.Direction == "positive";
-                    bool isNegative = mapping.GamepadAxis.Direction == "negative";
-                    bool exceededThreshold = (isPositive && axisValue > 16384) || (isNegative && axisValue < -16384);
-
-                    if (verbose)
-                    {
-                        Console.WriteLine($"Axis {axisIndex}: Value = {axisValue}, Direction = {mapping.GamepadAxis.Direction}, Exceeded Threshold = {exceededThreshold}");
-                    }
-
-                    if (exceededThreshold)
-                    {
-                        if (verbose)
-                        {
-                            Console.WriteLine($"Triggering keys for Axis {axisIndex}: {string.Join(", ", mapping.KeyboardKeys)}");
-                        }
-
-                        foreach (var key in mapping.KeyboardKeys)
-                        {
-                            keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
-                            keybd_event((byte)key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                        }
-                    }
-                }
-            }
         }
     }
 }
