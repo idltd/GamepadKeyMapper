@@ -16,7 +16,7 @@ class Program
 
     const int KEYEVENTF_KEYDOWN = 0x0000;
     const int KEYEVENTF_KEYUP = 0x0002;
-
+    private Dictionary<int, int> previousAxisValues = new Dictionary<int, int>();
     private static readonly HashSet<int> ModifierKeys = new HashSet<int>
     {
         0x10, // VK_SHIFT
@@ -29,7 +29,9 @@ class Program
     private Dictionary<int, ButtonMapping> buttonMappings = new Dictionary<int, ButtonMapping>();
     private Dictionary<int, List<AxisMapping>> axisMappings = new Dictionary<int, List<AxisMapping>>();
     private HashSet<int> pressedButtons = new HashSet<int>();
-    private const int AxisThreshold = 5000; // Adjust as needed
+
+    private const int AxisResolutionDivisor = 10000;
+    private const int AxisThreshold = 1; // Adjusted for the new scale
 
     class ButtonMapping
     {
@@ -183,31 +185,49 @@ class Program
 
     private void ProcessAxis(int axisValue, int axisIndex, bool verbose)
     {
-        if (!axisMappings.ContainsKey(axisIndex)) return;
+        int scaledValue = axisValue / AxisResolutionDivisor;
 
-        foreach (var mapping in axisMappings[axisIndex])
+        if (!previousAxisValues.TryGetValue(axisIndex, out int previousValue) || previousValue != scaledValue)
         {
-            int relativePosition = axisValue - 32768; // Assuming 16-bit range, adjust if different
-            bool exceededThreshold = (mapping.Direction == "positive" && relativePosition > AxisThreshold) ||
-                                     (mapping.Direction == "negative" && relativePosition < -AxisThreshold);
+            previousAxisValues[axisIndex] = scaledValue;
 
             if (verbose)
             {
-                Console.WriteLine($"Axis {axisIndex}: Value = {axisValue}, Direction = {mapping.Direction}, Exceeded Threshold = {exceededThreshold}");
+                Console.WriteLine($"Axis {axisIndex}: Raw Value = {axisValue}, Scaled Value = {scaledValue}");
             }
 
-            if (exceededThreshold)
+            if (!axisMappings.ContainsKey(axisIndex))
             {
                 if (verbose)
                 {
-                    Console.WriteLine($"Triggering keys for Axis {axisIndex}: {string.Join(", ", mapping.KeyboardKeys)}");
+                    Console.WriteLine($"No mapping found for Axis {axisIndex}");
+                }
+                return;
+            }
+
+            foreach (var mapping in axisMappings[axisIndex])
+            {
+                int relativePosition = scaledValue - 3; // Assuming 16-bit range scaled down, center is now at 3
+                bool exceededThreshold = (mapping.Direction == "positive" && relativePosition > AxisThreshold) ||
+                                         (mapping.Direction == "negative" && relativePosition < -AxisThreshold);
+
+                if (verbose)
+                {
+                    Console.WriteLine($"Axis {axisIndex}: Direction = {mapping.Direction}, Relative Position = {relativePosition}, Exceeded Threshold = {exceededThreshold}");
                 }
 
-                ProcessButtonPress(new ButtonMapping { KeyboardKeys = mapping.KeyboardKeys });
+                if (exceededThreshold)
+                {
+                    if (verbose)
+                    {
+                        Console.WriteLine($"Triggering keys for Axis {axisIndex}: {string.Join(", ", mapping.KeyboardKeys)}");
+                    }
+
+                    ProcessButtonPress(new ButtonMapping { KeyboardKeys = mapping.KeyboardKeys });
+                }
             }
         }
     }
-
     async Task ExecuteAsync(FileInfo configFile, string profileName, bool verbose, bool list)
     {
         if (!configFile.Exists)
@@ -283,11 +303,25 @@ class Program
 
         Console.WriteLine("Gamepad connected. Press Ctrl+C to exit.");
 
+
+        if (verbose)
+        {
+            var caps = device.Capabilities;
+            Console.WriteLine($"Button Count: {caps.ButtonCount}");
+            Console.WriteLine($"Axis Count: {caps.AxeCount}");
+        }
+
         while (true)
         {
             device.Poll();
             var state = device.GetCurrentState();
 
+
+            if (verbose)
+            {
+                Console.WriteLine($"Buttons: {string.Join(", ", state.Buttons)}");
+                Console.WriteLine($"X: {state.X}, Y: {state.Y}");
+            }
             // Process buttons
             for (int i = 0; i < state.Buttons.Length; i++)
             {
@@ -319,8 +353,15 @@ class Program
             // Process axes
             ProcessAxis(state.X, 0, verbose);
             ProcessAxis(state.Y, 1, verbose);
-            // Add more axes as needed
-
+            ProcessAxis(state.Z, 2, verbose);
+            ProcessAxis(state.RotationX, 3, verbose);
+            ProcessAxis(state.RotationY, 4, verbose);
+            ProcessAxis(state.RotationZ, 5, verbose);
+            // Add more axes as needed, e.g., sliders
+            for (int i = 0; i < state.Sliders.Length; i++)
+            {
+                ProcessAxis(state.Sliders[i], 6 + i, verbose);
+            }
             await Task.Delay(5);
         }
     }
