@@ -11,7 +11,14 @@ using SharpDX.DirectInput;
 class Program
 {
     private HashSet<int> pressedButtons = new HashSet<int>();
-
+    private static readonly HashSet<int> ModifierKeys = new HashSet<int>
+    {
+        0x10, // VK_SHIFT
+        0x11, // VK_CONTROL
+        0x12, // VK_ALT
+        0x5B, // VK_LWIN (Left Windows key)
+        0x5C  // VK_RWIN (Right Windows key)
+    };
     [DllImport("user32.dll")]
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
@@ -231,60 +238,84 @@ class Program
 
         Console.WriteLine("Gamepad connected. Press Ctrl+C to exit.");
 
-while (true)
-{
-    device.Poll();
-    var state = device.GetCurrentState();
-
-    // Process buttons
-    for (int i = 0; i < state.Buttons.Length; i++)
-    {
-        var mapping = buttonMappings.FirstOrDefault(m => m.GamepadButton == i);
-        
-        if (state.Buttons[i])
+        while (true)
         {
-            if (!pressedButtons.Contains(i))
-            {
-                // Button has just been pressed
-                pressedButtons.Add(i);
+            device.Poll();
+            var state = device.GetCurrentState();
 
-                if (verbose)
+            // Process buttons
+            for (int i = 0; i < state.Buttons.Length; i++)
+            {
+                var mapping = buttonMappings.FirstOrDefault(m => m.GamepadButton == i);
+
+                if (state.Buttons[i])
                 {
-                    if (mapping != null)
+                    if (!pressedButtons.Contains(i))
                     {
-                        Console.WriteLine($"Gamepad button {i} pressed. Sending keys: {string.Join(", ", mapping.KeyboardKeys)}");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Gamepad button {i} pressed. Sending Nothing");
+                        // Button has just been pressed
+                        pressedButtons.Add(i);
+
+                        if (verbose)
+                        {
+                            if (mapping != null)
+                            {
+                                Console.WriteLine($"Gamepad button {i} pressed. Sending keys: {string.Join(", ", mapping.KeyboardKeys)}");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Gamepad button {i} pressed. Sending Nothing");
+                            }
+                        }
+
+                        if (mapping != null)
+                        {
+                            var currentModifiers = new HashSet<int>();
+
+                            foreach (var key in mapping.KeyboardKeys)
+                            {
+                                if (ModifierKeys.Contains(key))
+                                {
+                                    // If it's a modifier key, add it to current modifiers and press it
+                                    currentModifiers.Add(key);
+                                    keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                                }
+                                else
+                                {
+                                    // If it's not a modifier key, press and release it
+                                    keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                                    keybd_event((byte)key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+                                    // Release all current modifiers
+                                    foreach (var modifier in currentModifiers)
+                                    {
+                                        keybd_event((byte)modifier, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                                    }
+                                    currentModifiers.Clear();
+                                }
+                            }
+
+                            // Release any remaining modifiers
+                            foreach (var modifier in currentModifiers)
+                            {
+                                keybd_event((byte)modifier, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                            }
+                        }
                     }
                 }
-
-                if (mapping != null)
+                else
                 {
-                    // Trigger keyboard event
-                    foreach (var key in mapping.KeyboardKeys)
-                    {
-                        keybd_event((byte)key, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
-                        keybd_event((byte)key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    }
+                    // Button released
+                    pressedButtons.Remove(i);
                 }
             }
-        }
-        else
-        {
-            // Button released
-            pressedButtons.Remove(i);
-        }
-    }
 
-    // Process axes
-    ProcessAxis(state.X, buttonMappings.Where(m => m.GamepadAxis?.Axis == 0), 0, verbose);
-    ProcessAxis(state.Y, buttonMappings.Where(m => m.GamepadAxis?.Axis == 1), 1, verbose);
-    // Add more axes as needed
+            // Process axes
+            ProcessAxis(state.X, buttonMappings.Where(m => m.GamepadAxis?.Axis == 0), 0, verbose);
+            ProcessAxis(state.Y, buttonMappings.Where(m => m.GamepadAxis?.Axis == 1), 1, verbose);
+            // Add more axes as needed
 
-    await Task.Delay(5);
-}
+            await Task.Delay(5);
+        }
 
         void ProcessAxis(int axisValue, IEnumerable<ButtonMapping> axisMappings, int axisIndex, bool verbose)
         {
