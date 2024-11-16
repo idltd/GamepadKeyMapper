@@ -290,25 +290,35 @@ class Program
         }
 
         var directInput = new DirectInput();
-        var joystick = directInput.GetDevices(DeviceType.Gamepad, DeviceEnumerationFlags.AllDevices).FirstOrDefault();
+        // Changed from DeviceType.Gamepad to DeviceClass.GameControl
+        var gameControllers = directInput.GetDevices(DeviceClass.GameControl, DeviceEnumerationFlags.AllDevices);
 
-        if (joystick == null)
+        if (!gameControllers.Any())
         {
-            Console.WriteLine("No gamepad found.");
+            Console.WriteLine("No game controllers found.");
             return;
         }
 
-        var device = new Joystick(directInput, joystick.InstanceGuid);
+        // Get the first available controller
+        var controller = gameControllers.FirstOrDefault();
+        if (controller == null)
+        {
+            Console.WriteLine("No game controller found.");
+            return;
+        }
+
+        var device = new Joystick(directInput, controller.InstanceGuid);
         device.Acquire();
 
-        Console.WriteLine("Gamepad connected. Press Ctrl+C to exit.");
-
+        Console.WriteLine($"Connected to: {controller.InstanceName}");
+        Console.WriteLine("Press Ctrl+C to exit.");
 
         if (verbose)
         {
             var caps = device.Capabilities;
             Console.WriteLine($"Button Count: {caps.ButtonCount}");
             Console.WriteLine($"Axis Count: {caps.AxeCount}");
+            Console.WriteLine($"POV Count: {caps.PovCount}");
         }
 
         while (true)
