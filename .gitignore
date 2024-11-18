@@ -2,3 +2,5 @@
 **/obj/
 GamepadKeyMapper/00-run.txt
 /.vs/GamepadKeyMapper
+/GamepadKeyMapper/Properties/PublishProfiles
+/GamepadKeyMapper/GamepadKeyMapper.csproj.user
