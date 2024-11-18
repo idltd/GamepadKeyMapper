@@ -43,6 +43,26 @@
                 "/verbosity:detailed"
             ],
             "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "publish-win64",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "publish",
+                "-c",
+                "Release",
+                "-r",
+                "win-x64",
+                "--self-contained",
+                "true",
+                "/p:PublishSingleFile=true"
+            ],
+            "problemMatcher": "$msCompile",
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
         }
     ]
 }
